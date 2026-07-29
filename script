@@ -6,7 +6,7 @@ local CoreGui = game:GetService("CoreGui");
 local Lighting = game:GetService("Lighting");
 local LocalPlayer = Players.LocalPlayer;
 local Camera = workspace.CurrentCamera;
-local Mouse = LocalPlayer:GetMouse();
+local Mouse = LocalPlayer:GetMouse( ц);
 local PASTE_RAW_URL = "https://raw.githubusercontent.com/gamesense2023-design/bgdd/main/whitelist";
 local function detect_http_getter()
 	if ((type(syn) == "table") and (type(syn.request) == "function")) then
@@ -87,18 +87,22 @@ local function checkWhitelist()
 			return true;
 		end
 	end
-	LocalPlayer:Kick("НАХУЙ ПОШЕЛ");
+	LocalPlayer:Kick("здаров братишка ты помоему перепутал не? пошел нахуй да пидор ебаный ебали твой рот нахуй всем стадом своей деревни пошел нахуй пидор да иди нахуй гуляй отсюад нахйу пидрила ебаная нахуй");
 	return false;
 end
 if not checkWhitelist() then
 	return;
 end
-local Config = {Enabled=true,MenuKey=Enum.KeyCode.P,HitboxToggleKey=nil,PlayerListToggleKey=Enum.KeyCode.P,Accent=Color3.fromRGB(0, 160, 255),Hitbox={Active=false,SizeX=8,SizeY=8,SizeZ=4,Transparency=1,R=255,G=255,B=255},Trigger={Active=false,Mode="Player",WallCheck=false,Delay=0,LastShot=0,TriggerKey=Enum.KeyCode.T,MaxRange=70},Targeting={Selected={}},Skybox={SelectedPreset="Default"},Utility={AutoReload=false,AutoReloadKeybind=nil,RapidFire={Enabled=false,ToggleKey=nil,Delay=0.02}},Autoshoot={Active=false,ShootDelayMs=200,ShotsPerTrigger=1,HoldKey=nil,HoldToShoot=false,LastTriggerTime=0,MultiHost=true},PlayerListVisible=true,Esp={Name=false,NameKeybind=nil,Chams=false,ChamsKeybind=nil,ChamsColor=Color3.fromRGB(255, 168, 255),ChamsTransparency=0.5,MaxDist=10000}};
+local Config = {Enabled=true,MenuKey=Enum.KeyCode.P,HitboxToggleKey=nil,PlayerListToggleKey=Enum.KeyCode.P,Accent=Color3.fromRGB(0, 160, 255),Hitbox={Active=false,SizeX=8,SizeY=8,SizeZ=4,Transparency=1,R=255,G=255,B=255},Trigger={Active=false,Mode="Player",WallCheck=false,Delay=0,LastShot=0,TriggerKey=Enum.KeyCode.T,MaxRange=70},Targeting={Selected={}},Skybox={SelectedPreset="Default"},Utility={AutoReload=false,AutoReloadKeybind=nil,RapidFire={Enabled=false,ToggleKey=nil,Delay=0.02}},Autoshoot={Active=false,ShootDelayMs=200,ShotsPerTrigger=1,HoldKey=nil,HoldToShoot=false,LastTriggerTime=0,MultiHost=true},PlayerListVisible=true,Esp={Name=false,NameKeybind=nil,Chams=false,ChamsKeybind=nil,ChamsColor=Color3.fromRGB(255, 168, 255),ChamsTransparency=0.5,MaxDist=10000},TriggerAllMode=false};
 local MODE_OFF = 0;
 local MODE_AUTOSHOOT = 1;
 local MODE_TRIGGER = 2;
 local MODE_NAMES = {"Neutral","Autoshot","Trigger"};
 local MODE_COLORS = {Color3.fromRGB(100, 100, 110),Color3.fromRGB(220, 60, 60),Color3.fromRGB(0, 160, 255)};
+
+-- Таблица для хранения оригинальных размеров хитбоксов
+local originalHitboxSizes = {};
+
 local function GetPlayerMode(playerName)
 	local mode = Config.Targeting.Selected[playerName];
 	if (mode == nil) then
@@ -198,6 +202,9 @@ local function GetCurrentRange()
 	return Config.Trigger.MaxRange;
 end
 local RapidFireHolding = false;
+-- [FIX] Флаг: зажата ли ЛКМ прямо сейчас (независимо от Ctrl)
+local LMBPhysicallyHeld = false;
+
 local function DoRapidFireAttack()
 	local character = LocalPlayer.Character;
 	if character then
@@ -226,26 +233,68 @@ local function DoRapidFireAttack()
 end
 local function RapidFireCycle()
 	while RapidFireHolding and Config.Utility.RapidFire.Enabled do
-		DoRapidFireAttack();
-		task.wait(Config.Utility.RapidFire.Delay);
+		-- [FIX] Пауза стрельбы пока зажат Ctrl, но цикл не прерывается
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl) then
+			task.wait(0.05);
+		else
+			DoRapidFireAttack();
+			task.wait(Config.Utility.RapidFire.Delay);
+		end
 	end
 end
+
+-- [FIX] IsCtrlBlocked теперь используется только для блокировки запуска нового цикла
+local function IsCtrlBlocked()
+	return Config.Utility.RapidFire.Enabled and (
+		UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or
+		UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+	);
+end
+
 local function OnMouseDown()
+	LMBPhysicallyHeld = true;
 	if not Config.Utility.RapidFire.Enabled then
+		return;
+	end
+	if IsCtrlBlocked() then
+		-- ЛКМ зажата, но Ctrl заблокирован — цикл не запускаем,
+		-- он стартует когда Ctrl отпустят (см. обработчик InputEnded для Ctrl)
 		return;
 	end
 	RapidFireHolding = true;
 	task.spawn(RapidFireCycle);
 end
 local function OnMouseUp()
+	LMBPhysicallyHeld = false;
 	RapidFireHolding = false;
 end
 Mouse.Button1Down:Connect(OnMouseDown);
 Mouse.Button1Up:Connect(OnMouseUp);
+
+-- [FIX] При отпускании Ctrl: если ЛКМ всё ещё зажата и RF включён — возобновляем стрельбу
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+	local key = input.KeyCode;
+	if (key == Enum.KeyCode.LeftControl or key == Enum.KeyCode.RightControl) then
+		if Config.Utility.RapidFire.Enabled and LMBPhysicallyHeld and not RapidFireHolding then
+			RapidFireHolding = true;
+			task.spawn(RapidFireCycle);
+		end
+	end
+end);
+
 local function GetHitboxScreenBounds(hrp, cam)
 	local size = hrp.Size;
 	local cf = hrp.CFrame;
-	local corners = {cf:PointToWorldSpace(Vector3.new(-size.X / 2, -size.Y / 2, -size.Z / 2)),cf:PointToWorldSpace(Vector3.new(size.X / 2, -size.Y / 2, -size.Z / 2)),cf:PointToWorldSpace(Vector3.new(-size.X / 2, size.Y / 2, -size.Z / 2)),cf:PointToWorldSpace(Vector3.new(size.X / 2, size.Y / 2, -size.Z / 2)),cf:PointToWorldSpace(Vector3.new(-size.X / 2, -size.Y / 2, size.Z / 2)),cf:PointToWorldSpace(Vector3.new(size.X / 2, -size.Y / 2, size.Z / 2)),cf:PointToWorldSpace(Vector3.new(-size.X / 2, size.Y / 2, size.Z / 2)),cf:PointToWorldSpace(Vector3.new(size.X / 2, size.Y / 2, size.Z / 2))};
+	local corners = {
+		cf:PointToWorldSpace(Vector3.new(-size.X/2,-size.Y/2,-size.Z/2)),
+		cf:PointToWorldSpace(Vector3.new( size.X/2,-size.Y/2,-size.Z/2)),
+		cf:PointToWorldSpace(Vector3.new(-size.X/2, size.Y/2,-size.Z/2)),
+		cf:PointToWorldSpace(Vector3.new( size.X/2, size.Y/2,-size.Z/2)),
+		cf:PointToWorldSpace(Vector3.new(-size.X/2,-size.Y/2, size.Z/2)),
+		cf:PointToWorldSpace(Vector3.new( size.X/2,-size.Y/2, size.Z/2)),
+		cf:PointToWorldSpace(Vector3.new(-size.X/2, size.Y/2, size.Z/2)),
+		cf:PointToWorldSpace(Vector3.new( size.X/2, size.Y/2, size.Z/2)),
+	};
 	local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge;
 	for _, worldPos in ipairs(corners) do
 		local screenPos, onScreen = cam:WorldToViewportPoint(worldPos);
@@ -257,25 +306,6 @@ local function GetHitboxScreenBounds(hrp, cam)
 		end
 	end
 	return minX, minY, maxX, maxY;
-end
-local function IsMouseOverPlayer(player, mousePos, cam, ignoreList)
-	local char = player.Character;
-	if not char then
-		return false;
-	end
-	local part = getPrimaryPart(char);
-	if not part then
-		return false;
-	end
-	local params = RaycastParams.new();
-	params.FilterType = Enum.RaycastFilterType.Blacklist;
-	params.FilterDescendantsInstances = ignoreList;
-	local ray = cam:ViewportPointToRay(mousePos.X, mousePos.Y);
-	local hit = workspace:Raycast(ray.Origin, ray.Direction * 1000, params);
-	if (hit and hit.Instance) then
-		return hit.Instance:IsDescendantOf(char);
-	end
-	return false;
 end
 if CoreGui:FindFirstChild("emoline") then
 	CoreGui.emoline:Destroy();
@@ -1106,27 +1136,19 @@ local chamsG = Config.Esp.ChamsColor.G * 255;
 local chamsB = Config.Esp.ChamsColor.B * 255;
 AddSlider(EspPage, "Chams Red", 0, 255, chamsR, function(v)
 	Config.Esp.ChamsColor = Color3.fromRGB(v, Config.Esp.ChamsColor.G * 255, Config.Esp.ChamsColor.B * 255);
-	if Config.Esp.Chams then
-		updateAllChams();
-	end
+	if Config.Esp.Chams then updateAllChams(); end
 end);
 AddSlider(EspPage, "Chams Green", 0, 255, chamsG, function(v)
 	Config.Esp.ChamsColor = Color3.fromRGB(Config.Esp.ChamsColor.R * 255, v, Config.Esp.ChamsColor.B * 255);
-	if Config.Esp.Chams then
-		updateAllChams();
-	end
+	if Config.Esp.Chams then updateAllChams(); end
 end);
 AddSlider(EspPage, "Chams Blue", 0, 255, chamsB, function(v)
 	Config.Esp.ChamsColor = Color3.fromRGB(Config.Esp.ChamsColor.R * 255, Config.Esp.ChamsColor.G * 255, v);
-	if Config.Esp.Chams then
-		updateAllChams();
-	end
+	if Config.Esp.Chams then updateAllChams(); end
 end);
 AddSlider(EspPage, "Chams Transparency", 0, 1, Config.Esp.ChamsTransparency, function(v)
 	Config.Esp.ChamsTransparency = v;
-	if Config.Esp.Chams then
-		updateAllChams();
-	end
+	if Config.Esp.Chams then updateAllChams(); end
 end);
 AddSlider(EspPage, "Max Distance", 50, 10000, Config.Esp.MaxDist, function(v)
 	Config.Esp.MaxDist = v;
@@ -1164,16 +1186,12 @@ holdKeyBtn.Parent = holdKeyBindFrame;
 Instance.new("UICorner", holdKeyBtn);
 local listeningForHold = false;
 holdKeyBtn.MouseButton1Click:Connect(function()
-	if listeningForHold then
-		return;
-	end
+	if listeningForHold then return; end
 	listeningForHold = true;
 	holdKeyBtn.Text = "...";
 	local conn;
 	conn = UserInputService.InputBegan:Connect(function(input, gpe)
-		if gpe then
-			return;
-		end
+		if gpe then return; end
 		if (input.UserInputType == Enum.UserInputType.Keyboard) then
 			local key = input.KeyCode;
 			if ((key == Enum.KeyCode.Delete) or (key == Enum.KeyCode.Backspace)) then
@@ -1210,9 +1228,7 @@ modeFrame.Position = UDim2.new(0, 10, 0, 35);
 modeFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45);
 modeFrame.BorderSizePixel = 0;
 modeFrame.Parent = modeCont;
-local mfCorner = Instance.new("UICorner");
-mfCorner.CornerRadius = UDim.new(0, 6);
-mfCorner.Parent = modeFrame;
+Instance.new("UICorner", modeFrame).CornerRadius = UDim.new(0, 6);
 local revBtn = Instance.new("TextButton");
 revBtn.Size = UDim2.new(0.5, -2, 1, 0);
 revBtn.Position = UDim2.new(0, 0, 0, 0);
@@ -1223,9 +1239,7 @@ revBtn.TextSize = 11;
 revBtn.Font = Enum.Font.GothamBold;
 revBtn.BorderSizePixel = 0;
 revBtn.Parent = modeFrame;
-local revCorner = Instance.new("UICorner");
-revCorner.CornerRadius = UDim.new(0, 6);
-revCorner.Parent = revBtn;
+Instance.new("UICorner", revBtn).CornerRadius = UDim.new(0, 6);
 local dbBtn = Instance.new("TextButton");
 dbBtn.Size = UDim2.new(0.5, -2, 1, 0);
 dbBtn.Position = UDim2.new(0.5, 2, 0, 0);
@@ -1236,9 +1250,7 @@ dbBtn.TextSize = 11;
 dbBtn.Font = Enum.Font.GothamBold;
 dbBtn.BorderSizePixel = 0;
 dbBtn.Parent = modeFrame;
-local dbCorner = Instance.new("UICorner");
-dbCorner.CornerRadius = UDim.new(0, 6);
-dbCorner.Parent = dbBtn;
+Instance.new("UICorner", dbBtn).CornerRadius = UDim.new(0, 6);
 revBtn.MouseButton1Click:Connect(function()
 	Config.Autoshoot.ShotsPerTrigger = 6;
 	revBtn.BackgroundColor3 = Config.Accent;
@@ -1309,34 +1321,51 @@ local function CreateCompactDevCard(parent, userId, displayName, role)
 	IDLabel.TextXAlignment = Enum.TextXAlignment.Left;
 	IDLabel.Parent = Card;
 end
-CreateCompactDevCard(InfoContainer, "937301074", "exasperation (zxq2w)", "DEVELOPER");
-CreateCompactDevCard(InfoContainer, "1233222005", "teenagerpopstar (3ampv)", "CO-DEVELOPER");
-CreateCompactDevCard(InfoContainer, "874087128", "p_x (immersedesing)", "CO-DEVELOPER");
-CreateCompactDevCard(InfoContainer, "8564093357", "affectionstalker821 (ceoturber)", "LEAD SCRIPTER");
-CreateCompactDevCard(InfoContainer, "556172951", "cvvnotfound (cv3ur)", "EMOLINE OWNER");
-RunService.Heartbeat:Connect(function()
-	if not Config.Hitbox.Active then
-		return;
+CreateCompactDevCard(InfoContainer, "8748496275", "softcloudypanda49107 (starvation38147)", "DEVELOPER");
+CreateCompactDevCard(InfoContainer, "9640605107", "vampyricbunnyheartve (iceicefe)", "LOVE");
+
+-- [FIX] Функция восстановления оригинального размера хитбокса
+local function RestoreOriginalSize(part, playerName)
+	if originalHitboxSizes[playerName] then
+		part.Size = originalHitboxSizes[playerName];
+		part.Transparency = 1;
+		part.Material = Enum.Material.Plastic;
+		part.Color = Color3.new(1, 1, 1);
 	end
-	local sizeX, sizeY, sizeZ = Config.Hitbox.SizeX, Config.Hitbox.SizeY, Config.Hitbox.SizeZ;
+end
+
+-- [FIX] Улучшенный Heartbeat для хитбоксов с мгновенным восстановлением
+RunService.Heartbeat:Connect(function()
+	local sizeX = Config.Hitbox.SizeX;
+	local sizeY = Config.Hitbox.SizeY;
+	local sizeZ = Config.Hitbox.SizeZ;
 	local trans = Config.Hitbox.Transparency;
 	local color = Color3.fromRGB(Config.Hitbox.R, Config.Hitbox.G, Config.Hitbox.B);
+	
 	for _, p in pairs(Players:GetPlayers()) do
-		if (p == LocalPlayer) then
-			continue;
-		end
+		if (p == LocalPlayer) then continue; end
 		local char = p.Character;
-		if not char then
-			continue;
-		end
+		if not char then continue; end
 		local part = getPrimaryPart(char);
-		if not part then
+		if not part then continue; end
+		
+		-- Сохраняем оригинальный размер при первой встрече
+		if not originalHitboxSizes[p.Name] then
+			originalHitboxSizes[p.Name] = part.Size;
+		end
+		
+		part.CanCollide = false;
+		
+		if not Config.Hitbox.Active then
+			RestoreOriginalSize(part, p.Name);
 			continue;
 		end
+		
 		local mode = GetPlayerMode(p.Name);
 		local isDead = not isAlive(p);
 		local knocked = isKnockedOut(p);
 		local shouldExpand = ((mode == MODE_AUTOSHOOT) or (mode == MODE_TRIGGER)) and not isDead and not knocked;
+		
 		if knocked then
 			part.Size = Vector3.new(0.01, 0.01, 0.01);
 			part.Transparency = 1;
@@ -1348,38 +1377,11 @@ RunService.Heartbeat:Connect(function()
 			part.Color = color;
 			part.Material = Enum.Material.ForceField;
 		else
-			part.Size = Vector3.new(2, 2, 1);
-			part.Transparency = 1;
-			part.Material = Enum.Material.Plastic;
-			part.Color = Color3.new(1, 1, 1);
+			RestoreOriginalSize(part, p.Name);
 		end
 	end
 end);
-RunService.RenderStepped:Connect(function()
-	for _, p in pairs(Players:GetPlayers()) do
-		if (p == LocalPlayer) then
-			continue;
-		end
-		local char = p.Character;
-		if not char then
-			continue;
-		end
-		local part = getPrimaryPart(char);
-		if not part then
-			continue;
-		end
-		local mode = GetPlayerMode(p.Name);
-		local isDead = not isAlive(p);
-		if isKnockedOut(p) then
-			part.CanCollide = false;
-		elseif not isDead then
-			local shouldDisableCollision = Config.Hitbox.Active and ((mode == MODE_AUTOSHOOT) or (mode == MODE_TRIGGER));
-			part.CanCollide = not shouldDisableCollision;
-		else
-			part.CanCollide = true;
-		end
-	end
-end);
+
 task.spawn(function()
 	while task.wait(0.1) do
 		if Config.Utility.AutoReload then
@@ -1387,94 +1389,84 @@ task.spawn(function()
 		end
 	end
 end);
-RunService.RenderStepped:Connect(function()
-	if not Config.Trigger.Active then
-		return;
-	end
-	if isHoldingKnife() then
-		return;
-	end
-	if ((tick() - Config.Trigger.LastShot) < Config.Trigger.Delay) then
-		return;
-	end
-	if not HasAmmo() then
-		return;
-	end
-	local currentRange = GetCurrentRange();
-	local mousePos = UserInputService:GetMouseLocation();
-	local bestTarget = nil;
-	local minMag = 50;
-	local mode = Config.Trigger.Mode;
-	local ignoreList = {LocalPlayer.Character};
-	if LocalPlayer.Character then
-		for _, tool in ipairs(LocalPlayer.Character:GetChildren()) do
-			if tool:IsA("Tool") then
-				table.insert(ignoreList, tool);
+task.spawn(function()
+	while true do
+		RunService.Heartbeat:Wait();
+		if not Config.Trigger.Active then continue; end
+		if isHoldingKnife() then continue; end
+		if ((tick() - Config.Trigger.LastShot) < Config.Trigger.Delay) then continue; end
+		if not HasAmmo() then continue; end
+		local currentRange = GetCurrentRange();
+		local mousePos = UserInputService:GetMouseLocation();
+		local bestTarget = nil;
+		local minMag = 50;
+		local mode = Config.Trigger.Mode;
+		local ignoreList = {};
+		if LocalPlayer.Character then
+			table.insert(ignoreList, LocalPlayer.Character);
+			for _, tool in ipairs(LocalPlayer.Character:GetChildren()) do
+				if tool:IsA("Tool") then
+					table.insert(ignoreList, tool);
+				end
 			end
 		end
-	end
-	for _, p in pairs(Players:GetPlayers()) do
-		if (p == LocalPlayer) then
-			continue;
-		end
-		if (GetPlayerMode(p.Name) ~= MODE_TRIGGER) then
-			continue;
-		end
-		if (not isAlive(p) or isKnockedOut(p)) then
-			continue;
-		end
-		local char = p.Character;
-		if not char then
-			continue;
-		end
-		local part = getPrimaryPart(char);
-		if not part then
-			continue;
-		end
-		local worldDist = (Camera.CFrame.Position - part.Position).Magnitude;
-		if (worldDist > currentRange) then
-			continue;
-		end
-		local canShoot = false;
-		if (mode == "Player") then
-			canShoot = IsMouseOverPlayer(p, mousePos, Camera, ignoreList);
-		else
-			local minX, minY, maxX, maxY = GetHitboxScreenBounds(part, Camera);
-			if (minX and maxX) then
-				if ((mousePos.X >= minX) and (mousePos.X <= maxX) and (mousePos.Y >= minY) and (mousePos.Y <= maxY)) then
-					if Config.Trigger.WallCheck then
-						local direction = (part.Position - Camera.CFrame.Position).Unit;
-						local ray = Ray.new(Camera.CFrame.Position, direction * worldDist);
-						local hit = workspace:FindPartOnRayWithIgnoreList(ray, ignoreList);
-						if hit then
-							local hitPlayer = Players:GetPlayerFromCharacter(hit:FindFirstAncestorOfClass("Model"));
-							canShoot = hitPlayer == p;
+		local rayParams = RaycastParams.new();
+		rayParams.FilterType = Enum.RaycastFilterType.Exclude;
+		rayParams.FilterDescendantsInstances = ignoreList;
+		for _, p in pairs(Players:GetPlayers()) do
+			if (p == LocalPlayer) then continue; end
+			if (GetPlayerMode(p.Name) ~= MODE_TRIGGER) then continue; end
+			if (not isAlive(p) or isKnockedOut(p)) then continue; end
+			local char = p.Character;
+			if not char then continue; end
+			local part = getPrimaryPart(char);
+			if not part then continue; end
+			local worldDist = (Camera.CFrame.Position - part.Position).Magnitude;
+			if (worldDist > currentRange) then continue; end
+			local canShoot = false;
+			if (mode == "Player") then
+				local ray = Camera:ViewportPointToRay(mousePos.X, mousePos.Y);
+				local hit = workspace:Raycast(ray.Origin, ray.Direction * 1000, rayParams);
+				if (hit and hit.Instance) then
+					canShoot = hit.Instance:IsDescendantOf(char);
+				end
+			else
+				local minX, minY, maxX, maxY = GetHitboxScreenBounds(part, Camera);
+				if (minX and maxX) then
+					if ((mousePos.X >= minX) and (mousePos.X <= maxX) and (mousePos.Y >= minY) and (mousePos.Y <= maxY)) then
+						if Config.Trigger.WallCheck then
+							local direction = (part.Position - Camera.CFrame.Position);
+							local wallHit = workspace:Raycast(Camera.CFrame.Position, direction, rayParams);
+							if wallHit then
+								local hitPlayer = Players:GetPlayerFromCharacter(wallHit.Instance:FindFirstAncestorOfClass("Model"));
+								canShoot = hitPlayer == p;
+							end
+						else
+							canShoot = true;
 						end
-					else
-						canShoot = true;
 					end
 				end
 			end
-		end
-		if canShoot then
-			if (mode == "Hitbox") then
-				local screenPos, _ = Camera:WorldToViewportPoint(part.Position);
-				local mag = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude;
-				if (mag < minMag) then
+			if canShoot then
+				if (mode == "Hitbox") then
+					local screenPos, _ = Camera:WorldToViewportPoint(part.Position);
+					local mag = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude;
+					if (mag < minMag) then
+						bestTarget = p;
+						minMag = mag;
+					end
+				else
 					bestTarget = p;
-					minMag = mag;
+					break;
 				end
-			else
-				bestTarget = p;
-				break;
 			end
 		end
-	end
-	if bestTarget then
-		Config.Trigger.LastShot = tick();
-		VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, true, game, 1);
-		task.wait(0.01);
-		VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, false, game, 1);
+		if bestTarget then
+			Config.Trigger.LastShot = tick();
+			VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, true, game, 1);
+			task.wait(0.01);
+			VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, false, game, 1);
+		end
 	end
 end);
 local lastAmmoTable = {};
@@ -1516,44 +1508,30 @@ local function PerformShots()
 	if (Config.Autoshoot.ShotsPerTrigger == 6) then
 		for i = 1, 6 do
 			EmulateShoot();
-			if (i < 6) then
-				task.wait(0.157);
-			end
+			if (i < 6) then task.wait(0.157); end
 		end
 	else
 		EmulateShoot();
 	end
 end
 UserInputService.InputBegan:Connect(function(input, gpe)
-	if gpe then
-		return;
-	end
+	if gpe then return; end
 	if (Config.Autoshoot.HoldKey and (input.KeyCode == Config.Autoshoot.HoldKey)) then
 		isHoldKeyPressed = true;
 	end
 end);
 UserInputService.InputEnded:Connect(function(input, gpe)
-	if gpe then
-		return;
-	end
+	if gpe then return; end
 	if (Config.Autoshoot.HoldKey and (input.KeyCode == Config.Autoshoot.HoldKey)) then
 		isHoldKeyPressed = false;
 	end
 end);
 RunService.Heartbeat:Connect(function()
-	if not Config.Autoshoot.Active then
-		return;
-	end
-	if (not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("Humanoid") or (LocalPlayer.Character.Humanoid.Health <= 0)) then
-		return;
-	end
-	if (Config.Autoshoot.HoldKey and not isHoldKeyPressed) then
-		return;
-	end
+	if not Config.Autoshoot.Active then return; end
+	if (not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("Humanoid") or (LocalPlayer.Character.Humanoid.Health <= 0)) then return; end
+	if (Config.Autoshoot.HoldKey and not isHoldKeyPressed) then return; end
 	local hosts = GetHosts();
-	if (#hosts == 0) then
-		return;
-	end
+	if (#hosts == 0) then return; end
 	for _, host in ipairs(hosts) do
 		local ammo, tool = GetHostAmmoAndTool(host);
 		if not tool then
@@ -1565,9 +1543,7 @@ RunService.Heartbeat:Connect(function()
 		elseif (ammo < (lastAmmoTable[host.Name] or 999)) then
 			local now = tick();
 			local delay = Config.Autoshoot.ShootDelayMs / 1000;
-			if (delay > 0) then
-				task.wait(delay);
-			end
+			if (delay > 0) then task.wait(delay); end
 			PerformShots();
 			Config.Autoshoot.LastTriggerTime = now;
 			lastAmmoTable[host.Name] = ammo;
@@ -1582,14 +1558,12 @@ PlayerListGui.ResetOnSpawn = false;
 PlayerListGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling;
 PlayerListGui.Parent = CoreGui;
 local PlayerListFrame = Instance.new("Frame");
-PlayerListFrame.Size = UDim2.new(0, 580, 0, 460);
+PlayerListFrame.Size = UDim2.new(0, 580, 0, 500);
 PlayerListFrame.Position = UDim2.new(0.02, 0, 0.1, 0);
 PlayerListFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20);
 PlayerListFrame.BorderSizePixel = 0;
 PlayerListFrame.Parent = PlayerListGui;
-local plCorner = Instance.new("UICorner");
-plCorner.CornerRadius = UDim.new(0, 8);
-plCorner.Parent = PlayerListFrame;
+Instance.new("UICorner", PlayerListFrame).CornerRadius = UDim.new(0, 8);
 local plStroke = Instance.new("UIStroke");
 plStroke.Color = Config.Accent;
 plStroke.Thickness = 1.5;
@@ -1598,9 +1572,7 @@ local PLTitle = Instance.new("Frame");
 PLTitle.Size = UDim2.new(1, 0, 0, 40);
 PLTitle.BackgroundColor3 = Color3.fromRGB(20, 20, 28);
 PLTitle.Parent = PlayerListFrame;
-local plTitleCorner = Instance.new("UICorner");
-plTitleCorner.CornerRadius = UDim.new(0, 8);
-plTitleCorner.Parent = PLTitle;
+Instance.new("UICorner", PLTitle).CornerRadius = UDim.new(0, 8);
 local PLTitleLabel = Instance.new("TextLabel");
 PLTitleLabel.Size = UDim2.new(1, -20, 1, 0);
 PLTitleLabel.Position = UDim2.new(0, 15, 0, 0);
@@ -1630,26 +1602,38 @@ UserInputService.InputEnded:Connect(function(input)
 		plDragging = false;
 	end
 end);
+local actionBtnRow = Instance.new("Frame");
+actionBtnRow.Size = UDim2.new(1, -20, 0, 36);
+actionBtnRow.Position = UDim2.new(0, 10, 0, 46);
+actionBtnRow.BackgroundTransparency = 1;
+actionBtnRow.Parent = PlayerListFrame;
 local ResetAllBtn = Instance.new("TextButton");
-ResetAllBtn.Size = UDim2.new(1, -20, 0, 36);
-ResetAllBtn.Position = UDim2.new(0, 10, 0, 46);
+ResetAllBtn.Size = UDim2.new(0.48, 0, 1, 0);
+ResetAllBtn.Position = UDim2.new(0, 0, 0, 0);
 ResetAllBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60);
 ResetAllBtn.Text = "RESET ALL";
 ResetAllBtn.TextColor3 = Color3.new(1, 1, 1);
 ResetAllBtn.Font = Enum.Font.GothamBold;
 ResetAllBtn.TextSize = 12;
-ResetAllBtn.Parent = PlayerListFrame;
-local rnCorner = Instance.new("UICorner");
-rnCorner.CornerRadius = UDim.new(0, 6);
-rnCorner.Parent = ResetAllBtn;
+ResetAllBtn.Parent = actionBtnRow;
+Instance.new("UICorner", ResetAllBtn).CornerRadius = UDim.new(0, 6);
+local TriggerAllBtn = Instance.new("TextButton");
+TriggerAllBtn.Size = UDim2.new(0.48, 0, 1, 0);
+TriggerAllBtn.Position = UDim2.new(0.52, 0, 0, 0);
+-- [FIX] Изначальный цвет — акцентный синий, активный — тоже синий (более яркий оттенок)
+TriggerAllBtn.BackgroundColor3 = Config.Accent;
+TriggerAllBtn.Text = "TRIGGER ALL";
+TriggerAllBtn.TextColor3 = Color3.new(1, 1, 1);
+TriggerAllBtn.Font = Enum.Font.GothamBold;
+TriggerAllBtn.TextSize = 12;
+TriggerAllBtn.Parent = actionBtnRow;
+Instance.new("UICorner", TriggerAllBtn).CornerRadius = UDim.new(0, 6);
 local HeaderRow = Instance.new("Frame");
 HeaderRow.Size = UDim2.new(1, -20, 0, 32);
 HeaderRow.Position = UDim2.new(0, 10, 0, 88);
 HeaderRow.BackgroundColor3 = Color3.fromRGB(25, 25, 35);
 HeaderRow.Parent = PlayerListFrame;
-local hrCorner = Instance.new("UICorner");
-hrCorner.CornerRadius = UDim.new(0, 6);
-hrCorner.Parent = HeaderRow;
+Instance.new("UICorner", HeaderRow).CornerRadius = UDim.new(0, 6);
 local NameHeader = Instance.new("TextLabel");
 NameHeader.Size = UDim2.new(0, 180, 1, 0);
 NameHeader.Position = UDim2.new(0, 12, 0, 0);
@@ -1724,9 +1708,7 @@ local function rebuildPlayerListGUI()
 		row.Size = UDim2.new(1, 0, 0, 42);
 		row.BackgroundColor3 = Color3.fromRGB(22, 22, 30);
 		row.Parent = PlayerScroll;
-		local rowCorner = Instance.new("UICorner");
-		rowCorner.CornerRadius = UDim.new(0, 6);
-		rowCorner.Parent = row;
+		Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6);
 		local nameLabel = Instance.new("TextLabel");
 		nameLabel.Size = UDim2.new(0, 180, 1, 0);
 		nameLabel.Position = UDim2.new(0, 12, 0, 0);
@@ -1810,27 +1792,56 @@ local function rebuildPlayerListGUI()
 	end
 end
 ResetAllBtn.MouseButton1Click:Connect(function()
+	Config.TriggerAllMode = false;
+	-- [FIX] При сбросе всех — кнопка TRIGGER ALL возвращается в обычный синий
+	TriggerAllBtn.BackgroundColor3 = Config.Accent;
 	for _, plr in pairs(Players:GetPlayers()) do
 		if (plr ~= LocalPlayer) then
 			SetPlayerMode(plr.Name, MODE_OFF);
+			local char = plr.Character;
+			if char then
+				local part = getPrimaryPart(char);
+				if part then
+					RestoreOriginalSize(part, plr.Name);
+				end
+			end
 		end
 	end
 	rebuildPlayerListGUI();
 end);
-Players.PlayerAdded:Connect(rebuildPlayerListGUI);
-Players.PlayerRemoving:Connect(rebuildPlayerListGUI);
-rebuildPlayerListGUI();
+TriggerAllBtn.MouseButton1Click:Connect(function()
+	Config.TriggerAllMode = not Config.TriggerAllMode;
+	-- [FIX] Активный режим — насыщенный синий (светлее акцента), неактивный — обычный акцентный синий
+	TriggerAllBtn.BackgroundColor3 = Config.TriggerAllMode and Color3.fromRGB(30, 200, 255) or Config.Accent;
+	
+	for _, plr in pairs(Players:GetPlayers()) do
+		if (plr ~= LocalPlayer) then
+			SetPlayerMode(plr.Name, Config.TriggerAllMode and MODE_TRIGGER or MODE_OFF);
+		end
+	end
+	rebuildPlayerListGUI();
+end);
 Players.PlayerAdded:Connect(function(player)
-	task.wait(0.5);
-	updateChamsForPlayer(player);
+	-- [FIX] Автоматически ставим MODE_TRIGGER если включен TriggerAllMode
+	if Config.TriggerAllMode then
+		SetPlayerMode(player.Name, MODE_TRIGGER);
+	end
+	rebuildPlayerListGUI();
 end);
 Players.PlayerRemoving:Connect(function(player)
+	-- Очищаем данные
+	originalHitboxSizes[player.Name] = nil;
 	if espObjects[player] then
 		if espObjects[player].name then
 			espObjects[player].name:Remove();
 		end
 		espObjects[player] = nil;
 	end
+end);
+rebuildPlayerListGUI();
+Players.PlayerAdded:Connect(function(player)
+	task.wait(0.5);
+	updateChamsForPlayer(player);
 end);
 RunService.RenderStepped:Connect(function()
 	if Config.Esp.Chams then
@@ -1842,18 +1853,14 @@ RunService.RenderStepped:Connect(function()
 	end
 end);
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then
-		return;
-	end
+	if gameProcessed then return; end
 	if (Config.Esp.NameKeybind and (input.KeyCode == Config.Esp.NameKeybind)) then
 		Config.Esp.Name = not Config.Esp.Name;
 		nameToggle(Config.Esp.Name);
 	end
 end);
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then
-		return;
-	end
+	if gameProcessed then return; end
 	if (Config.Esp.ChamsKeybind and (input.KeyCode == Config.Esp.ChamsKeybind)) then
 		Config.Esp.Chams = not Config.Esp.Chams;
 		chamsToggle(Config.Esp.Chams);
@@ -1874,13 +1881,9 @@ if drawingSupported then
 			return;
 		end
 		local camera = workspace.CurrentCamera;
-		if not camera then
-			return;
-		end
+		if not camera then return; end
 		for _, plr in pairs(Players:GetPlayers()) do
-			if (plr == LocalPlayer) then
-				continue;
-			end
+			if (plr == LocalPlayer) then continue; end
 			if (not isAlive(plr) or isKnockedOut(plr)) then
 				if (espObjects[plr] and espObjects[plr].name) then
 					espObjects[plr].name.Visible = false;
@@ -1888,13 +1891,9 @@ if drawingSupported then
 				continue;
 			end
 			local char = plr.Character;
-			if not char then
-				continue;
-			end
+			if not char then continue; end
 			local head = char:FindFirstChild("Head");
-			if not head then
-				continue;
-			end
+			if not head then continue; end
 			local dist = getDistanceBetweenPlayers(plr);
 			if (dist > Config.Esp.MaxDist) then
 				if (espObjects[plr] and espObjects[plr].name) then
@@ -1964,11 +1963,24 @@ UserInputService.InputBegan:Connect(function(i, g)
 	end
 end);
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then
-		return;
-	end
+	if gameProcessed then return; end
 	if (Config.HitboxToggleKey and (input.KeyCode == Config.HitboxToggleKey)) then
 		Config.Hitbox.Active = not Config.Hitbox.Active;
 		setHitboxToggle(Config.Hitbox.Active);
+		
+		-- [FIX] Восстанавливаем все хитбоксы сразу при выключении
+		if not Config.Hitbox.Active then
+			for _, plr in pairs(Players:GetPlayers()) do
+				if (plr ~= LocalPlayer) then
+					local char = plr.Character;
+					if char then
+						local part = getPrimaryPart(char);
+						if part then
+							RestoreOriginalSize(part, plr.Name);
+						end
+					end
+				end
+			end
+		end
 	end
 end);
