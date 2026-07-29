@@ -6,7 +6,7 @@ local CoreGui = game:GetService("CoreGui");
 local Lighting = game:GetService("Lighting");
 local LocalPlayer = Players.LocalPlayer;
 local Camera = workspace.CurrentCamera;
-local Mouse = LocalPlayer:GetMouse( ц);
+local Mouse = LocalPlayer:GetMouse();
 local PASTE_RAW_URL = "https://raw.githubusercontent.com/gamesense2023-design/bgdd/main/whitelist";
 local function detect_http_getter()
 	if ((type(syn) == "table") and (type(syn.request) == "function")) then
