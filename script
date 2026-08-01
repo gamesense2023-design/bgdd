@@ -95,7 +95,7 @@ end
 if not checkWhitelist() then
 	return;
 end
-local Config = {Enabled=true,MenuKey=Enum.KeyCode.P,HitboxToggleKey=nil,PlayerListToggleKey=Enum.KeyCode.P,SpecToggleKey=nil,SpecVisible=true,Accent=Color3.fromRGB(0, 160, 255),Hitbox={Active=false,SizeX=8,SizeY=8,SizeZ=4,Transparency=1,R=255,G=255,B=255},Trigger={Active=false,Mode="Player",WallCheck=false,Delay=0,LastShot=0,TriggerKey=Enum.KeyCode.T,MaxRange=70},Targeting={Selected={}},Skybox={SelectedPreset="Default"},Utility={AutoReload=false,AutoReloadKeybind=nil,RapidFire={Enabled=false,ToggleKey=nil,Delay=0.02},NoSpread=false,SpreadMin=40,SpreadMax=60},SilentAim={Enabled=false,Keybind=nil,TargetPart="Head",FOV=360,MaxRange=250,Visibility=true,ShowFOV=true,Filled=true},Autoshoot={Active=false,ShootDelayMs=200,ShotsPerTrigger=1,HoldKey=nil,HoldToShoot=false,LastTriggerTime=0,MultiHost=true},PlayerListVisible=true,Esp={Name=false,NameKeybind=nil,Chams=false,ChamsKeybind=nil,ChamsColor=Color3.fromRGB(255, 168, 255),ChamsTransparency=0.5,MaxDist=10000},TriggerAllMode=false};
+local Config = {Enabled=true,MenuKey=Enum.KeyCode.P,HitboxToggleKey=nil,PlayerListToggleKey=nil,SpecToggleKey=nil,SpecVisible=true,Accent=Color3.fromRGB(0, 160, 255),Hitbox={Active=false,SizeX=8,SizeY=8,SizeZ=4,Transparency=1,R=255,G=255,B=255},Trigger={Active=false,Mode="Player",WallCheck=false,Delay=0,LastShot=0,TriggerKey=Enum.KeyCode.T,MaxRange=70},Targeting={Selected={}},Skybox={SelectedPreset="Default"},Utility={AutoReload=false,AutoReloadKeybind=nil,RapidFire={Enabled=false,ToggleKey=nil,Delay=0.02},NoSpread=false,SpreadMin=40,SpreadMax=60},SilentAim={Enabled=false,Keybind=nil,TargetPart="Head",FOV=360,MaxRange=250,Visibility=true,ShowFOV=true,Filled=true},Autoshoot={Active=false,ShootDelayMs=200,ShotsPerTrigger=1,HoldKey=nil,HoldToShoot=false,LastTriggerTime=0,MultiHost=true},PlayerListVisible=true,Esp={Name=false,NameKeybind=nil,Chams=false,ChamsKeybind=nil,ChamsColor=Color3.fromRGB(255, 168, 255),ChamsTransparency=0.5,MaxDist=10000},TriggerAllMode=false};
 local MODE_OFF = 0;
 local MODE_AUTOSHOOT = 1;
 local MODE_TRIGGER = 2;
@@ -611,11 +611,11 @@ local function DoRapidFireAttack()
 			end
 		end
 	end
+	local mousePos = UserInputService:GetMouseLocation();
 	pcall(function()
-		local args = {UserInputType=Enum.UserInputType.MouseButton1};
-		UserInputService:InputBegan(args, false);
+		VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, true, game, 1);
 		task.wait(0.001);
-		UserInputService:InputEnded(args, false);
+		VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, false, game, 1);
 	end);
 end
 local function RapidFireCycle()
@@ -1690,7 +1690,7 @@ AddKeybindWithNone(SettingsPage, "Menu Toggle Key", Config.MenuKey, function(key
 	Config.MenuKey = key or Enum.KeyCode.P;
 end);
 AddKeybindWithNone(SettingsPage, "Hide PlayerList Key", Config.PlayerListToggleKey, function(key)
-	Config.PlayerListToggleKey = key or Enum.KeyCode.P;
+	Config.PlayerListToggleKey = key;
 end);
 AddKeybindWithNone(SettingsPage, "Spectator List Key", Config.SpecToggleKey, function(key)
 	Config.SpecToggleKey = key;
@@ -1766,11 +1766,13 @@ CreateCompactDevCard(InfoContainer, "9640605107", "vampyricbunnyheartve (iceicef
 
 -- [FIX] Функция восстановления оригинального размера хитбокса
 local function RestoreOriginalSize(part, playerName)
-	if originalHitboxSizes[playerName] then
-		part.Size = originalHitboxSizes[playerName];
-		part.Transparency = 1;
-		part.Material = Enum.Material.Plastic;
-		part.Color = Color3.new(1, 1, 1);
+	local orig = originalHitboxSizes[playerName];
+	if (orig and part) then
+		part.Size = orig.Size;
+		part.Transparency = orig.Transparency;
+		part.Material = orig.Material;
+		part.Color = orig.Color;
+		part.CanCollide = orig.CanCollide;
 	end
 end
 
@@ -1781,41 +1783,48 @@ RunService.Heartbeat:Connect(function()
 	local sizeZ = Config.Hitbox.SizeZ;
 	local trans = Config.Hitbox.Transparency;
 	local color = Color3.fromRGB(Config.Hitbox.R, Config.Hitbox.G, Config.Hitbox.B);
-	
+	local active = Config.Hitbox.Active;
+
 	for _, p in pairs(Players:GetPlayers()) do
 		if (p == LocalPlayer) then continue; end
 		local char = p.Character;
 		if not char then continue; end
 		local part = getPrimaryPart(char);
 		if not part then continue; end
-		
-		-- Сохраняем оригинальный размер при первой встрече
+
+		-- Сохраняем оригинальные свойства при первой встрече
 		if not originalHitboxSizes[p.Name] then
-			originalHitboxSizes[p.Name] = part.Size;
+			originalHitboxSizes[p.Name] = {
+				Size = part.Size,
+				Transparency = part.Transparency,
+				Material = part.Material,
+				Color = part.Color,
+				CanCollide = part.CanCollide,
+			};
 		end
-		
-		part.CanCollide = false;
-		
-		if not Config.Hitbox.Active then
+
+		if not active then
 			RestoreOriginalSize(part, p.Name);
 			continue;
 		end
-		
+
 		local mode = GetPlayerMode(p.Name);
 		local isDead = not isAlive(p);
 		local knocked = isKnockedOut(p);
 		local shouldExpand = ((mode == MODE_AUTOSHOOT) or (mode == MODE_TRIGGER)) and not isDead and not knocked;
-		
+
 		if knocked then
 			part.Size = Vector3.new(0.01, 0.01, 0.01);
 			part.Transparency = 1;
 			part.Material = Enum.Material.Plastic;
 			part.Color = Color3.new(1, 1, 1);
+			part.CanCollide = false;
 		elseif shouldExpand then
 			part.Size = Vector3.new(sizeX, sizeY, sizeZ);
 			part.Transparency = trans;
 			part.Color = color;
 			part.Material = Enum.Material.ForceField;
+			part.CanCollide = false;
 		else
 			RestoreOriginalSize(part, p.Name);
 		end
@@ -1982,11 +1991,11 @@ RunService.Heartbeat:Connect(function()
 			lastToolTable[host.Name] = tool;
 		elseif (ammo < (lastAmmoTable[host.Name] or 999)) then
 			local now = tick();
+			lastAmmoTable[host.Name] = ammo;
 			local delay = Config.Autoshoot.ShootDelayMs / 1000;
 			if (delay > 0) then task.wait(delay); end
 			PerformShots();
 			Config.Autoshoot.LastTriggerTime = now;
-			lastAmmoTable[host.Name] = ammo;
 		else
 			lastAmmoTable[host.Name] = ammo;
 		end
@@ -2271,9 +2280,10 @@ end);
 Players.PlayerRemoving:Connect(function(player)
 	-- Очищаем данные
 	originalHitboxSizes[player.Name] = nil;
+	Config.Targeting.Selected[player.Name] = nil;
 	if espObjects[player] then
-		if espObjects[player].name then
-			espObjects[player].name:Remove();
+		if espObjects[player].label then
+			espObjects[player].label:Destroy();
 		end
 		espObjects[player] = nil;
 	end
@@ -2312,76 +2322,95 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		chamsToggle(Config.Esp.Chams);
 	end
 end);
-local drawingSupported = pcall(function()
-	local d = Drawing.new("Text");
-	d:Remove();
+-- [FIX] Show Name на GUI-лейблах: Drawing.Text не гарантированно рендерится в Real,
+-- GUI рендерится всегда (тот же подход, что и у FOV-кольца).
+local EspNameGui = Instance.new("ScreenGui");
+EspNameGui.Name = "emolineNameEsp";
+EspNameGui.ResetOnSpawn = false;
+EspNameGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling;
+EspNameGui.IgnoreGuiInset = true;
+local espGuiOk = pcall(function()
+	EspNameGui.Parent = CoreGui;
 end);
-if drawingSupported then
-	RunService.RenderStepped:Connect(function()
-		if not Config.Esp.Name then
-			for _, objTable in pairs(espObjects) do
-				if objTable.name then
-					objTable.name.Visible = false;
-				end
-			end
-			return;
-		end
-		local camera = workspace.CurrentCamera;
-		if not camera then return; end
-		for _, plr in pairs(Players:GetPlayers()) do
-			if (plr == LocalPlayer) then continue; end
-			if (not isAlive(plr) or isKnockedOut(plr)) then
-				if (espObjects[plr] and espObjects[plr].name) then
-					espObjects[plr].name.Visible = false;
-				end
-				continue;
-			end
-			local char = plr.Character;
-			if not char then continue; end
-			local head = char:FindFirstChild("Head");
-			if not head then continue; end
-			local dist = getDistanceBetweenPlayers(plr);
-			if (dist > Config.Esp.MaxDist) then
-				if (espObjects[plr] and espObjects[plr].name) then
-					espObjects[plr].name.Visible = false;
-				end
-				continue;
-			end
-			local headScreen, onScreen = camera:WorldToViewportPoint(head.Position);
-			if not onScreen then
-				if (espObjects[plr] and espObjects[plr].name) then
-					espObjects[plr].name.Visible = false;
-				end
-				continue;
-			end
-			if not espObjects[plr] then
-				espObjects[plr] = {};
-			end
-			if Config.Esp.Name then
-				if not espObjects[plr].name then
-					espObjects[plr].name = Drawing.new("Text");
-					espObjects[plr].name.Size = 12;
-					espObjects[plr].name.Center = true;
-					espObjects[plr].name.Outline = true;
-				end
-				espObjects[plr].name.Visible = true;
-				espObjects[plr].name.Text = plr.DisplayName;
-				espObjects[plr].name.Position = Vector2.new(headScreen.X, headScreen.Y - 25);
-				espObjects[plr].name.Color = Color3.new(1, 1, 1);
-			elseif espObjects[plr].name then
-				espObjects[plr].name.Visible = false;
-			end
-		end
-		for plr, objTable in pairs(espObjects) do
-			if (not plr or not plr.Parent) then
-				if objTable.name then
-					objTable.name:Remove();
-				end
-				espObjects[plr] = nil;
-			end
-		end
-	end);
+if not espGuiOk then
+	EspNameGui.Parent = LocalPlayer:WaitForChild("PlayerGui");
 end
+
+local function ensureNameLabel(plr)
+	if not espObjects[plr] then
+		espObjects[plr] = {};
+	end
+	local label = espObjects[plr].label;
+	if not label then
+		label = Instance.new("TextLabel");
+		label.Name = "emolineNameLabel";
+		label.Size = UDim2.new(0, 220, 0, 16);
+		label.BackgroundTransparency = 1;
+		label.Font = Enum.Font.GothamBold;
+		label.TextSize = 12;
+		label.TextColor3 = Color3.new(1, 1, 1);
+		label.TextStrokeTransparency = 0;
+		label.TextStrokeColor3 = Color3.new(0, 0, 0);
+		label.TextXAlignment = Enum.TextXAlignment.Center;
+		label.AnchorPoint = Vector2.new(0.5, 1);
+		label.ZIndex = 30;
+		label.Parent = EspNameGui;
+		espObjects[plr].label = label;
+	end
+	return label;
+end
+
+RunService.RenderStepped:Connect(function()
+	local camera = workspace.CurrentCamera;
+	if not Config.Esp.Name then
+		for _, objTable in pairs(espObjects) do
+			if objTable.label then
+				objTable.label.Visible = false;
+			end
+		end
+		return;
+	end
+	if not camera then return; end
+	for _, plr in pairs(Players:GetPlayers()) do
+		if (plr == LocalPlayer) then continue; end
+		if (not isAlive(plr) or isKnockedOut(plr)) then
+			if (espObjects[plr] and espObjects[plr].label) then
+				espObjects[plr].label.Visible = false;
+			end
+			continue;
+		end
+		local char = plr.Character;
+		if not char then continue; end
+		local head = char:FindFirstChild("Head");
+		if not head then continue; end
+		local dist = getDistanceBetweenPlayers(plr);
+		if (dist > Config.Esp.MaxDist) then
+			if (espObjects[plr] and espObjects[plr].label) then
+				espObjects[plr].label.Visible = false;
+			end
+			continue;
+		end
+		local headScreen, onScreen = camera:WorldToViewportPoint(head.Position);
+		if not onScreen then
+			if (espObjects[plr] and espObjects[plr].label) then
+				espObjects[plr].label.Visible = false;
+			end
+			continue;
+		end
+		local label = ensureNameLabel(plr);
+		label.Visible = true;
+		label.Text = plr.DisplayName;
+		label.Position = UDim2.new(0, headScreen.X, 0, headScreen.Y - 18);
+	end
+	for plr, objTable in pairs(espObjects) do
+		if (not plr or not plr.Parent) then
+			if objTable.label then
+				objTable.label:Destroy();
+			end
+			espObjects[plr] = nil;
+		end
+	end
+end);
 LocalPlayer.CharacterAdded:Connect(function()
 	task.wait(1);
 	updateAllChams();
@@ -2554,35 +2583,79 @@ end);
 
 task.spawn(function()
 	local ReplicatedStorage = game:GetService("ReplicatedStorage");
-	local AdminRemotes = ReplicatedStorage:WaitForChild("AdminRemotes", 10);
-	if AdminRemotes then
-		local function updateState()
-			local active = (AdminRemotes:GetAttribute("SpecActive") == true);
-			setSpectatingState(active);
-		end
-		
-		updateState();
-		AdminRemotes:GetAttributeChangedSignal("SpecActive"):Connect(updateState);
-		
-		local spectateRemote = AdminRemotes:FindFirstChild("Spectate");
-		if (spectateRemote and spectateRemote:IsA("RemoteEvent")) then
-			spectateRemote.OnClientEvent:Connect(function(target, spec)
-				setSpectatingState(target ~= nil);
-			end);
-		end
-		
-		local specDataRemote = AdminRemotes:FindFirstChild("SpecData");
-		if (specDataRemote and specDataRemote:IsA("RemoteEvent")) then
-			specDataRemote.OnClientEvent:Connect(function()
-				setSpectatingState(true);
-			end);
+	local AdminRemotes = ReplicatedStorage:WaitForChild("AdminRemotes", 30);
+
+	local remoteSpectating = false;
+	local remoteSince = 0;
+	local connected = false;
+
+	local function attributeActive()
+		if not AdminRemotes then return false; end
+		local v = AdminRemotes:GetAttribute("SpecActive");
+		return (v ~= nil) and (v ~= false);
+	end
+
+	local function refresh()
+		setSpectatingState(attributeActive() or remoteSpectating);
+	end
+
+	local function setRemote(active)
+		if (active ~= remoteSpectating) then
+			remoteSpectating = active;
+			if active then remoteSince = os.clock(); end
+			refresh();
 		end
 	end
-	
+
+	local function setup()
+		if connected or not AdminRemotes then return; end
+		connected = true;
+
+		AdminRemotes:GetAttributeChangedSignal("SpecActive"):Connect(refresh);
+
+		local function connectRemote(name, handler)
+			local r = AdminRemotes:FindFirstChild(name);
+			if (r and r:IsA("RemoteEvent")) then
+				r.OnClientEvent:Connect(handler);
+			end
+		end
+
+		connectRemote("AdminSpectateNew", function(...)
+			local args = {...};
+			if (#args >= 1) and (args[1] == false) then
+				setRemote(false);
+			else
+				setRemote(true);
+			end
+		end);
+		connectRemote("HideFromCheaters", function()
+			setRemote(true);
+		end);
+		connectRemote("ShowCheaters", function()
+			setRemote(false);
+		end);
+		connectRemote("Spectate", function(target)
+			setRemote(target ~= nil);
+		end);
+		connectRemote("SpecData", function()
+			setRemote(true);
+		end);
+
+		refresh();
+	end
+
+	setup();
+
 	while task.wait(1) do
-		if AdminRemotes then
-			local isSpec = (AdminRemotes:GetAttribute("SpecActive") == true);
-			setSpectatingState(isSpec);
+		if not AdminRemotes then
+			AdminRemotes = ReplicatedStorage:FindFirstChild("AdminRemotes");
+			setup();
+		else
+			local active = attributeActive();
+			if (remoteSpectating and not active and ((os.clock() - remoteSince) > 30)) then
+				remoteSpectating = false;
+			end
+			setSpectatingState(active or remoteSpectating);
 		end
 	end
 end);
