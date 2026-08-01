@@ -9,9 +9,10 @@ local Camera = workspace.CurrentCamera;
 local Mouse = LocalPlayer:GetMouse();
 local PASTE_RAW_URL = "https://raw.githubusercontent.com/gamesense2023-design/bgdd/main/whitelist";
 local function detect_http_getter()
-	if ((type(syn) == "table") and (type(syn.request) == "function")) then
+	local env = (getgenv and getgenv()) or _G;
+	if ((type(env.syn) == "table") and (type(env.syn.request) == "function")) then
 		return function(url)
-			local r = syn.request({Url=url,Method="GET"});
+			local r = env.syn.request({Url=url,Method="GET"});
 			return (r and (r.Body or r.body)) or r;
 		end;
 	end
@@ -30,9 +31,9 @@ local function detect_http_getter()
 			return r;
 		end;
 	end
-	if ((type(xeno) == "table") and (type(xeno.request) == "function")) then
+	if ((type(env.xeno) == "table") and (type(env.xeno.request) == "function")) then
 		return function(url)
-			local r = xeno.request({Url=url,Method="GET"});
+			local r = env.xeno.request({Url=url,Method="GET"});
 			return (r and (r.Body or r.body)) or r;
 		end;
 	end
@@ -57,7 +58,8 @@ local allowedUsers = {};
 do
 	local raw = fetch_raw(PASTE_RAW_URL);
 	if raw then
-		local ok, chunk = pcall(loadstring or load, raw);
+		local loader = loadstring or ((getgenv and getgenv()) or _G).load;
+		local ok, chunk = pcall(loader, raw);
 		if (ok and (type(chunk) == "function")) then
 			local ok2, result = pcall(chunk);
 			if (ok2 and (type(result) == "table")) then
@@ -93,7 +95,7 @@ end
 if not checkWhitelist() then
 	return;
 end
-local Config = {Enabled=true,MenuKey=Enum.KeyCode.P,HitboxToggleKey=nil,PlayerListToggleKey=Enum.KeyCode.P,Accent=Color3.fromRGB(0, 160, 255),Hitbox={Active=false,SizeX=8,SizeY=8,SizeZ=4,Transparency=1,R=255,G=255,B=255},Trigger={Active=false,Mode="Player",WallCheck=false,Delay=0,LastShot=0,TriggerKey=Enum.KeyCode.T,MaxRange=70},Targeting={Selected={}},Skybox={SelectedPreset="Default"},Utility={AutoReload=false,AutoReloadKeybind=nil,RapidFire={Enabled=false,ToggleKey=nil,Delay=0.02}},Autoshoot={Active=false,ShootDelayMs=200,ShotsPerTrigger=1,HoldKey=nil,HoldToShoot=false,LastTriggerTime=0,MultiHost=true},PlayerListVisible=true,Esp={Name=false,NameKeybind=nil,Chams=false,ChamsKeybind=nil,ChamsColor=Color3.fromRGB(255, 168, 255),ChamsTransparency=0.5,MaxDist=10000},TriggerAllMode=false};
+local Config = {Enabled=true,MenuKey=Enum.KeyCode.P,HitboxToggleKey=nil,PlayerListToggleKey=Enum.KeyCode.P,SpecToggleKey=nil,SpecVisible=true,Accent=Color3.fromRGB(0, 160, 255),Hitbox={Active=false,SizeX=8,SizeY=8,SizeZ=4,Transparency=1,R=255,G=255,B=255},Trigger={Active=false,Mode="Player",WallCheck=false,Delay=0,LastShot=0,TriggerKey=Enum.KeyCode.T,MaxRange=70},Targeting={Selected={}},Skybox={SelectedPreset="Default"},Utility={AutoReload=false,AutoReloadKeybind=nil,RapidFire={Enabled=false,ToggleKey=nil,Delay=0.02},NoSpread=false,SpreadMin=40,SpreadMax=60},SilentAim={Enabled=false,Keybind=nil,TargetPart="Head",FOV=360,MaxRange=250,Visibility=true,ShowFOV=true,Filled=true},Autoshoot={Active=false,ShootDelayMs=200,ShotsPerTrigger=1,HoldKey=nil,HoldToShoot=false,LastTriggerTime=0,MultiHost=true},PlayerListVisible=true,Esp={Name=false,NameKeybind=nil,Chams=false,ChamsKeybind=nil,ChamsColor=Color3.fromRGB(255, 168, 255),ChamsTransparency=0.5,MaxDist=10000},TriggerAllMode=false};
 local MODE_OFF = 0;
 local MODE_AUTOSHOOT = 1;
 local MODE_TRIGGER = 2;
@@ -196,6 +198,382 @@ local function AutoReload()
 		VirtualInputManager:SendKeyEvent(true, keyCode, false, game);
 		task.wait(0.05);
 		VirtualInputManager:SendKeyEvent(false, keyCode, false, game);
+	end
+end
+
+local function applyNoSpreadToTool(tool)
+	if not tool or not tool:IsA("Tool") then return; end
+	pcall(function()
+		for _, obj in ipairs(tool:GetDescendants()) do
+			if obj:IsA("NumberValue") or obj:IsA("IntValue") or obj:IsA("DoubleConstrainedValue") then
+				local name = obj.Name:lower();
+				if (name:find("spread") or name:find("recoil") or name:find("inaccuracy") or name:find("cone")) then
+					obj.Value = 0;
+				end
+			end
+		end
+	end);
+end
+
+-- ===== NoSpread: Boom Hood использует RandomBulletOffsets/CustomOffsets в Config =====
+local NoSpreadOriginal = nil;
+
+local function SnapshotNoSpreadConfig()
+	if NoSpreadOriginal then return; end
+	pcall(function()
+		local ReplicatedStorage = game:GetService("ReplicatedStorage");
+		local modules = ReplicatedStorage:FindFirstChild("Modules");
+		if not modules then return; end
+		local gunModuleFolder = modules:FindFirstChild("GunModule");
+		if not gunModuleFolder then return; end
+		local configModule = gunModuleFolder:FindFirstChild("Config");
+		if not (configModule and configModule:IsA("ModuleScript")) then return; end
+		local okReq, gunConfig = pcall(require, configModule);
+		if (not okReq) or (type(gunConfig) ~= "table") then return; end
+		local okClone, freshConfig = pcall(require, configModule:Clone());
+		if (not okClone) or (type(freshConfig) ~= "table") then freshConfig = gunConfig; end
+		NoSpreadOriginal = {_recoil = _G.Recoil};
+		for gunName, fresh in pairs(freshConfig) do
+			if (type(fresh) == "table") then
+				local orig = {};
+				if (type(fresh.RandomBulletOffsets) == "table") then
+					orig.RandomBulletOffsets = {};
+					for i, set in pairs(fresh.RandomBulletOffsets) do
+						if (type(set) == "table") then
+							local copied = {};
+							for j, vec in pairs(set) do
+								copied[j] = vec;
+							end
+							orig.RandomBulletOffsets[i] = copied;
+						end
+					end
+				end
+				if (type(fresh.CustomOffsets) == "table") then
+					orig.CustomOffsets = {};
+					for j, vec in pairs(fresh.CustomOffsets) do
+						orig.CustomOffsets[j] = vec;
+					end
+				end
+				NoSpreadOriginal[gunName] = orig;
+			end
+		end
+	end);
+end
+
+local function RandomizeNoSpread()
+	local minPct = math.clamp(Config.Utility.SpreadMin or 0, 0, 100) / 100;
+	local maxPct = math.clamp(Config.Utility.SpreadMax or 0, 0, 100) / 100;
+	if (minPct > maxPct) then
+		minPct, maxPct = maxPct, minPct;
+	end
+	SnapshotNoSpreadConfig();
+	pcall(function()
+		local ReplicatedStorage = game:GetService("ReplicatedStorage");
+		local modules = ReplicatedStorage:FindFirstChild("Modules");
+		if not modules then return; end
+		local gunModuleFolder = modules:FindFirstChild("GunModule");
+		if not gunModuleFolder then return; end
+		local configModule = gunModuleFolder:FindFirstChild("Config");
+		if not (configModule and configModule:IsA("ModuleScript")) then return; end
+		local okReq, gunConfig = pcall(require, configModule);
+		if (not okReq) or (type(gunConfig) ~= "table") then return; end
+		local doneTables = {};
+		for gunName, orig in pairs(NoSpreadOriginal or {}) do
+			local cfg = gunConfig[gunName];
+			if (type(cfg) ~= "table" or type(orig) ~= "table") then continue; end
+			if (type(cfg.RandomBulletOffsets) == "table" and type(orig.RandomBulletOffsets) == "table" and not doneTables[cfg.RandomBulletOffsets]) then
+				doneTables[cfg.RandomBulletOffsets] = true;
+				for i, set in pairs(cfg.RandomBulletOffsets) do
+					local origSet = orig.RandomBulletOffsets[i];
+					if (type(set) == "table" and type(origSet) == "table") then
+						local factor = minPct + ((maxPct - minPct) * math.random());
+						for j, vec in pairs(set) do
+							local base = (typeof(origSet[j]) == "Vector3" and origSet[j]) or vec;
+							if typeof(base) == "Vector3" then
+								set[j] = base * factor;
+							end
+						end
+					end
+				end
+			end
+			if (type(cfg.CustomOffsets) == "table" and type(orig.CustomOffsets) == "table" and not doneTables[cfg.CustomOffsets]) then
+				doneTables[cfg.CustomOffsets] = true;
+				local factor = minPct + ((maxPct - minPct) * math.random());
+				for j, vec in pairs(cfg.CustomOffsets) do
+					local base = (typeof(orig.CustomOffsets[j]) == "Vector3" and orig.CustomOffsets[j]) or vec;
+					if typeof(base) == "Vector3" then
+						cfg.CustomOffsets[j] = base * factor;
+					end
+				end
+			end
+		end
+	end);
+end
+
+local function RestoreNoSpread()
+	pcall(function()
+		local ReplicatedStorage = game:GetService("ReplicatedStorage");
+		local modules = ReplicatedStorage:FindFirstChild("Modules");
+		if not modules then return; end
+		local gunModuleFolder = modules:FindFirstChild("GunModule");
+		if not gunModuleFolder then return; end
+		local configModule = gunModuleFolder:FindFirstChild("Config");
+		if not (configModule and configModule:IsA("ModuleScript")) then return; end
+		local okReq, gunConfig = pcall(require, configModule);
+		if (not okReq) or (type(gunConfig) ~= "table") then return; end
+		for gunName, orig in pairs(NoSpreadOriginal or {}) do
+			local cfg = gunConfig[gunName];
+			if (type(cfg) ~= "table" or type(orig) ~= "table") then continue; end
+			if (type(cfg.RandomBulletOffsets) == "table" and type(orig.RandomBulletOffsets) == "table") then
+				for i, set in pairs(cfg.RandomBulletOffsets) do
+					local origSet = orig.RandomBulletOffsets[i];
+					if (type(set) == "table" and type(origSet) == "table") then
+						for j in pairs(set) do
+							set[j] = origSet[j];
+						end
+					end
+				end
+			end
+			if (type(cfg.CustomOffsets) == "table" and type(orig.CustomOffsets) == "table") then
+				for j in pairs(cfg.CustomOffsets) do
+					cfg.CustomOffsets[j] = orig.CustomOffsets[j];
+				end
+			end
+		end
+	end);
+end
+
+local function applyNoSpreadAll()
+	if Config.Utility.NoSpread then
+		SnapshotNoSpreadConfig();
+		RandomizeNoSpread();
+		_G.Recoil = false;
+		pcall(function()
+			if LocalPlayer.Backpack then
+				for _, tool in ipairs(LocalPlayer.Backpack:GetChildren()) do
+					applyNoSpreadToTool(tool);
+				end
+			end
+			if LocalPlayer.Character then
+				for _, tool in ipairs(LocalPlayer.Character:GetChildren()) do
+					applyNoSpreadToTool(tool);
+				end
+			end
+		end);
+	else
+		RestoreNoSpread();
+		if (NoSpreadOriginal and NoSpreadOriginal._recoil ~= nil) then
+			_G.Recoil = NoSpreadOriginal._recoil;
+		end
+	end
+end
+
+task.spawn(function()
+	while task.wait(0.3) do
+		applyNoSpreadAll();
+	end
+end);
+-- ===== Silent Aim (Boom Hood): сервер и урон доверяют клиентским hit-партам =====
+-- Цели берутся из плеер-листа: только игроки с ролью Trigger.
+local SilentAim = Config.SilentAim;
+local SAEnv = (getgenv and getgenv()) or _G;
+local function saIsEnemyPart(part)
+	if not part then return false; end
+	local model = part:FindFirstAncestorWhichIsA("Model");
+	if not model or model == LocalPlayer.Character then return false; end
+	return model:FindFirstChildOfClass("Humanoid") ~= nil;
+end
+local function saChoosePart(char)
+	local part = char:FindFirstChild(SilentAim.TargetPart);
+	if not part then part = char:FindFirstChild("HumanoidRootPart"); end
+	return part;
+end
+local function saHasLOS(part)
+	local char = LocalPlayer.Character;
+	if not char then return true; end
+	local origin = Camera.CFrame.Position;
+	local params = RaycastParams.new();
+	params.FilterType = Enum.RaycastFilterType.Exclude;
+	local ignored = workspace:FindFirstChild("Ignored");
+	params.FilterDescendantsInstances = (ignored and {char, ignored}) or {char};
+	params.IgnoreWater = true;
+	local hit = workspace:Raycast(origin, (part.Position - origin).Unit * 500, params);
+	if not hit then return true; end
+	local model = hit.Instance:FindFirstAncestorWhichIsA("Model");
+	if model then
+		if model == char then return true; end
+		if model:FindFirstChildOfClass("Humanoid") then return true; end
+	end
+	return false;
+end
+local function saAimDir()
+	local cam = workspace.CurrentCamera;
+	if not cam then return Vector3.new(0, 0, -1); end
+	local ray = cam:ScreenPointToRay(Mouse.X, Mouse.Y);
+	return ray.Direction.Unit;
+end
+local function saGetTarget(range)
+	local char = LocalPlayer.Character;
+	if not char then return nil; end
+	local hum = char:FindFirstChildOfClass("Humanoid");
+	if not hum or hum.Health <= 0 then return nil; end
+	local cam = workspace.CurrentCamera;
+	local camPos = cam.CFrame.Position;
+	local camDir = saAimDir();
+	local fovMax = math.clamp(SilentAim.FOV or 360, 0, 360);
+	local fovRad = math.rad(fovMax);
+	local maxRange = math.min(range or math.huge, SilentAim.MaxRange or 250);
+	local bestPart, bestPos, bestScore = nil, nil, math.huge;
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer then
+			if GetPlayerMode(p.Name) ~= MODE_TRIGGER then continue; end
+			local c = p.Character;
+			if c and c:FindFirstChild("FULLY_LOADED_CHAR") then
+				local targetHum = c:FindFirstChildOfClass("Humanoid");
+				local be = c:FindFirstChild("BodyEffects");
+				local ko = be and be:FindFirstChild("K.O");
+				if targetHum and targetHum.Health > 0 and targetHum:GetState() ~= Enum.HumanoidStateType.Dead and not (ko and ko.Value) then
+					local part = saChoosePart(c);
+					if part then
+						local pos = part.Position;
+						local dist = (pos - camPos).Magnitude;
+						if dist <= maxRange then
+							local angle = math.acos(math.clamp(camDir:Dot((pos - camPos).Unit), -1, 1));
+							if fovRad >= math.pi or angle <= fovRad / 2 then
+								if (not SilentAim.Visibility) or saHasLOS(part) then
+									if angle < bestScore then
+										bestScore = angle;
+										bestPart = part;
+										bestPos = pos;
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	return bestPart, bestPos;
+end
+if not SAEnv.emolineSilentAimHooked then
+	pcall(function()
+		local ReplicatedStorage = game:GetService("ReplicatedStorage");
+		local modules = ReplicatedStorage:FindFirstChild("Modules");
+		local gunModule = modules and modules:FindFirstChild("GunModule");
+		local okGm, GunModule = pcall(require, gunModule);
+		if (not okGm) or (type(GunModule) ~= "table") then return; end
+		local realGetAim = GunModule.getAim;
+		local realShoot = GunModule.shoot;
+		if type(realGetAim) == "function" then
+			GunModule.getAim = function(origin, range)
+				if SilentAim.Enabled then
+					local target, aimPos = saGetTarget(range or SilentAim.MaxRange);
+					if target and aimPos then
+						local delta = aimPos - origin;
+						local len = delta.Magnitude;
+						if len > 0.5 then
+							return delta / len, len;
+						end
+					end
+				end
+				return realGetAim(origin, range);
+			end;
+		end
+		if type(realShoot) == "function" then
+			GunModule.shoot = function(p1)
+				local a, h, n, col = realShoot(p1);
+				if SilentAim.Enabled and p1 and p1.Shooter == LocalPlayer.Character then
+					local target, aimPos = saGetTarget(p1.Range or SilentAim.MaxRange);
+					if target and aimPos and not saIsEnemyPart(h) then
+						return aimPos, target, n, col;
+					end
+				end
+				return a, h, n, col;
+			end;
+		end
+		SAEnv.emolineSilentAimHooked = true;
+	end);
+end
+-- ===== FOV circle (Show FOV): кольцо поверх прицела игры =====
+-- GUI-круг: рендерится гарантированно (Drawing.Circle в Real не рисуется).
+-- Пространство MainScreenGui совпадает с вьюпортом 1:1 (Frame с центром в
+-- UDim2(0,Mouse.X,0,Mouse.Y) даёт центр ровно в точке мыши = прицеле игры).
+local FovRing = nil;
+local function ensureRingStroke(ring)
+	local stroke = ring:FindFirstChild("FovStroke");
+	if not stroke then
+		stroke = Instance.new("UIStroke");
+		stroke.Name = "FovStroke";
+		stroke.Parent = ring;
+	end
+	stroke.Color = Color3.new(1, 1, 1);
+	stroke.Thickness = 2;
+	stroke.Transparency = 0;
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border;
+	return stroke;
+end
+local function EnsureFovRing()
+	local gui = LocalPlayer.PlayerGui:FindFirstChild("MainScreenGui");
+	if not gui then return nil; end
+	if FovRing and FovRing.Parent == gui then
+		ensureRingStroke(FovRing);
+		return FovRing;
+	end
+	for _, child in ipairs(gui:GetChildren()) do
+		if child.Name == "emolineFovRing" then
+			pcall(function() child:Destroy(); end);
+		end
+	end
+	FovRing = nil;
+	local ring = Instance.new("Frame");
+	ring.Name = "emolineFovRing";
+	ring.AnchorPoint = Vector2.new(0.5, 0.5);
+	ring.BackgroundColor3 = Color3.new(1, 1, 1);
+	ring.BackgroundTransparency = 0.85;
+	ring.BorderSizePixel = 0;
+	ring.ZIndex = 20;
+	ring.Visible = false;
+	local corner = Instance.new("UICorner");
+	corner.CornerRadius = UDim.new(1, 0);
+	corner.Parent = ring;
+	ensureRingStroke(ring);
+	ring.Parent = gui;
+	FovRing = ring;
+	return ring;
+end
+local fovRenderFn = function()
+	local cam = workspace.CurrentCamera;
+	local ring = EnsureFovRing();
+	if (not cam) or (not ring) or (not SilentAim.ShowFOV) or (not SilentAim.Enabled) then
+		if ring then ring.Visible = false; end
+		return;
+	end
+	local fovDeg = math.clamp(SilentAim.FOV or 360, 1, 360);
+	local vFov = math.rad(cam.FieldOfView);
+	local aspect = cam.ViewportSize.X / math.max(1, cam.ViewportSize.Y);
+	local hFov = 2 * math.atan(math.tan(vFov / 2) * aspect);
+	local radius;
+	if fovDeg >= 360 then
+		radius = math.sqrt(cam.ViewportSize.X ^ 2 + cam.ViewportSize.Y ^ 2) / 2;
+	else
+		radius = (math.tan(math.rad(fovDeg) / 2) / math.tan(hFov / 2)) * (cam.ViewportSize.X / 2);
+	end
+	ring.Size = UDim2.new(0, math.max(2, radius * 2), 0, math.max(2, radius * 2));
+	ring.Position = UDim2.new(0, Mouse.X, 0, Mouse.Y);
+	ring.BackgroundTransparency = (SilentAim.Filled and 0.85) or 1;
+	ring.Visible = true;
+end;
+local STATE = ((getgenv and getgenv()) or _G).STATE;
+if STATE and STATE.connect then
+	STATE.onCleanup(function()
+		SAEnv.emolineFovLoopLive = nil;
+	end);
+	STATE.connect(RunService.RenderStepped, fovRenderFn);
+else
+	if not SAEnv.emolineFovLoopLive then
+		SAEnv.emolineFovLoopLive = true;
+		RunService.RenderStepped:Connect(fovRenderFn);
 	end
 end
 local function GetCurrentRange()
@@ -602,6 +980,7 @@ local function AddKeybindWithNone(parent, text, defaultKey, callback)
 end
 local HitboxPage = AddPage("Hitbox");
 local TriggerPage = AddPage("Trigger");
+local AimPage = AddPage("Aim");
 local EspPage = AddPage("Visual");
 local AutoshootPage = AddPage("Autoshoot");
 local UtilityPage = AddPage("Utility");
@@ -1261,11 +1640,51 @@ dbBtn.MouseButton1Click:Connect(function()
 	revBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55);
 	dbBtn.BackgroundColor3 = Config.Accent;
 end);
+AddToggle(UtilityPage, "Enable NoSpread", Config.Utility.NoSpread, function(v)
+	Config.Utility.NoSpread = v;
+	pcall(applyNoSpreadAll);
+end);
+AddSlider(UtilityPage, "Spread Min (%)", 0, 100, Config.Utility.SpreadMin, function(v)
+	Config.Utility.SpreadMin = v;
+	pcall(applyNoSpreadAll);
+end);
+AddSlider(UtilityPage, "Spread Max (%)", 0, 100, Config.Utility.SpreadMax, function(v)
+	Config.Utility.SpreadMax = v;
+	pcall(applyNoSpreadAll);
+end);
+AddDivider(AimPage, "───── SILENT AIM ─────");
+local silentAimToggleSetter = AddToggle(AimPage, "Enable Silent Aim", Config.SilentAim.Enabled, function(v)
+	Config.SilentAim.Enabled = v;
+end);
+AddKeybindWithNone(AimPage, "Silent Aim Toggle Key", Config.SilentAim.Keybind, function(key)
+	Config.SilentAim.Keybind = key;
+end);
+AddDropdown(AimPage, "Aim Part", {"Head","HumanoidRootPart"}, Config.SilentAim.TargetPart, function(v)
+	Config.SilentAim.TargetPart = v;
+end);
+AddSlider(AimPage, "FOV (360 = always)", 1, 360, Config.SilentAim.FOV, function(v)
+	Config.SilentAim.FOV = v;
+end);
+AddToggle(AimPage, "Show FOV (circle)", Config.SilentAim.ShowFOV, function(v)
+	Config.SilentAim.ShowFOV = v;
+end);
+AddToggle(AimPage, "FOV Filled", Config.SilentAim.Filled, function(v)
+	Config.SilentAim.Filled = v;
+end);
+AddSlider(AimPage, "Max Range (studs)", 10, 500, Config.SilentAim.MaxRange, function(v)
+	Config.SilentAim.MaxRange = v;
+end);
+AddToggle(AimPage, "Visibility Check", Config.SilentAim.Visibility, function(v)
+	Config.SilentAim.Visibility = v;
+end);
 AddKeybindWithNone(SettingsPage, "Menu Toggle Key", Config.MenuKey, function(key)
 	Config.MenuKey = key or Enum.KeyCode.P;
 end);
 AddKeybindWithNone(SettingsPage, "Hide PlayerList Key", Config.PlayerListToggleKey, function(key)
 	Config.PlayerListToggleKey = key or Enum.KeyCode.P;
+end);
+AddKeybindWithNone(SettingsPage, "Spectator List Key", Config.SpecToggleKey, function(key)
+	Config.SpecToggleKey = key;
 end);
 local InfoContainer = Instance.new("ScrollingFrame");
 InfoContainer.Size = UDim2.new(1, 0, 1, 0);
@@ -1287,9 +1706,21 @@ local function CreateCompactDevCard(parent, userId, displayName, role)
 	local Avatar = Instance.new("ImageLabel");
 	Avatar.Size = UDim2.new(0, 80, 0, 80);
 	Avatar.Position = UDim2.new(0, 15, 0.5, -40);
-	Avatar.BackgroundTransparency = 1;
+	Avatar.BackgroundColor3 = Color3.fromRGB(35, 35, 35);
+	Avatar.BackgroundTransparency = 0;
 	Avatar.Image = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. userId .. "&width=200&height=200&format=png";
 	Avatar.Parent = Card;
+	task.spawn(function()
+		local uid = tonumber(userId);
+		if uid then
+			local ok, img = pcall(function()
+				return Players:GetUserThumbnailAsync(uid, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150);
+			end);
+			if (ok and type(img) == "string" and (img ~= "") and Avatar.Parent) then
+				Avatar.Image = img;
+			end
+		end
+	end);
 	local NameLabel = Instance.new("TextLabel");
 	NameLabel.Size = UDim2.new(1, -110, 0, 24);
 	NameLabel.Position = UDim2.new(0, 105, 0, 20);
@@ -1854,6 +2285,12 @@ RunService.RenderStepped:Connect(function()
 end);
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return; end
+	if (Config.SilentAim.Keybind and (input.KeyCode == Config.SilentAim.Keybind)) then
+		silentAimToggleSetter(not Config.SilentAim.Enabled);
+	end
+end);
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return; end
 	if (Config.Esp.NameKeybind and (input.KeyCode == Config.Esp.NameKeybind)) then
 		Config.Esp.Name = not Config.Esp.Name;
 		nameToggle(Config.Esp.Name);
@@ -1981,6 +2418,161 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 					end
 				end
 			end
+		end
+	end
+end);
+
+-- ===== Spectator List: admin-spectate indicator (SpecActive flag, shared server-wide) =====
+pcall(function()
+	if CoreGui:FindFirstChild("SpecIndicatorGUI") then
+		CoreGui.SpecIndicatorGUI:Destroy();
+	end
+end);
+
+local SpecGui = Instance.new("ScreenGui");
+SpecGui.Name = "SpecIndicatorGUI";
+SpecGui.ResetOnSpawn = false;
+SpecGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling;
+
+local pcallSuccess = pcall(function()
+	SpecGui.Parent = CoreGui;
+end);
+if not pcallSuccess then
+	SpecGui.Parent = LocalPlayer:WaitForChild("PlayerGui");
+end
+
+local SpecFrame = Instance.new("Frame");
+SpecFrame.Name = "SpecFrame";
+SpecFrame.Size = UDim2.new(0, 320, 0, 40);
+SpecFrame.Position = UDim2.new(0, 20, 0, 20);
+SpecFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 22);
+SpecFrame.BorderSizePixel = 0;
+SpecFrame.Parent = SpecGui;
+
+local SpecCorner = Instance.new("UICorner");
+SpecCorner.CornerRadius = UDim.new(0, 8);
+SpecCorner.Parent = SpecFrame;
+
+local SpecStroke = Instance.new("UIStroke");
+SpecStroke.Color = Config.Accent;
+SpecStroke.Thickness = 1.5;
+SpecStroke.Parent = SpecFrame;
+
+local SpecLabel = Instance.new("TextLabel");
+SpecLabel.Size = UDim2.new(0, 110, 1, 0);
+SpecLabel.Position = UDim2.new(0, 10, 0, 0);
+SpecLabel.BackgroundTransparency = 1;
+SpecLabel.Font = Enum.Font.Gotham;
+SpecLabel.TextSize = 13;
+SpecLabel.TextColor3 = Color3.new(1, 1, 1);
+SpecLabel.TextXAlignment = Enum.TextXAlignment.Left;
+SpecLabel.Text = "spectating";
+SpecLabel.Parent = SpecFrame;
+
+local SpecStatus = Instance.new("TextLabel");
+SpecStatus.Size = UDim2.new(1, -130, 1, 0);
+SpecStatus.Position = UDim2.new(0, 110, 0, 0);
+SpecStatus.BackgroundTransparency = 1;
+SpecStatus.Font = Enum.Font.GothamBold;
+SpecStatus.TextSize = 12;
+SpecStatus.TextColor3 = Color3.fromRGB(150, 150, 150);
+SpecStatus.TextXAlignment = Enum.TextXAlignment.Right;
+SpecStatus.RichText = true;
+SpecStatus.Text = "No";
+SpecStatus.Parent = SpecFrame;
+
+local function InitSpecDrag(frame)
+	local dragStart, startPos, dragging;
+	frame.InputBegan:Connect(function(input)
+		if (input.UserInputType == Enum.UserInputType.MouseButton1) then
+			dragging = true;
+			dragStart = input.Position;
+			startPos = frame.Position;
+		end
+	end);
+	UserInputService.InputChanged:Connect(function(input)
+		if (dragging and (input.UserInputType == Enum.UserInputType.MouseMovement)) then
+			local delta = input.Position - dragStart;
+			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y);
+		end
+	end);
+	UserInputService.InputEnded:Connect(function(input)
+		if (input.UserInputType == Enum.UserInputType.MouseButton1) then
+			dragging = false;
+		end
+	end);
+end
+InitSpecDrag(SpecFrame);
+
+UserInputService.InputBegan:Connect(function(i, g)
+	if (not g and Config.SpecToggleKey and (i.KeyCode == Config.SpecToggleKey)) then
+		Config.SpecVisible = not Config.SpecVisible;
+		SpecGui.Enabled = Config.SpecVisible;
+	end
+end);
+
+local specActive = false;
+local function setSpectatingState(active)
+	if (active == specActive) then
+		return;
+	end
+	specActive = active;
+	if active then
+		SpecStatus.Text = "<font color=\"#FF5555\">Admin maybe spectating you</font>";
+		SpecStroke.Color = Color3.fromRGB(255, 70, 70);
+	else
+		SpecStatus.Text = "No";
+		SpecStroke.Color = Config.Accent;
+	end
+end
+
+task.spawn(function()
+	while true do
+		if specActive then
+			SpecFrame.BackgroundColor3 = Color3.fromRGB(40, 12, 12);
+			task.wait(0.35);
+			SpecFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 22);
+			task.wait(0.35);
+		else
+			if (SpecFrame.BackgroundColor3 ~= Color3.fromRGB(22, 22, 22)) then
+				SpecFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 22);
+			end
+			task.wait(0.25);
+		end
+	end
+end);
+
+task.spawn(function()
+	local ReplicatedStorage = game:GetService("ReplicatedStorage");
+	local AdminRemotes = ReplicatedStorage:WaitForChild("AdminRemotes", 10);
+	if AdminRemotes then
+		local function updateState()
+			local active = (AdminRemotes:GetAttribute("SpecActive") == true);
+			setSpectatingState(active);
+		end
+		
+		updateState();
+		AdminRemotes:GetAttributeChangedSignal("SpecActive"):Connect(updateState);
+		
+		local spectateRemote = AdminRemotes:FindFirstChild("Spectate");
+		if (spectateRemote and spectateRemote:IsA("RemoteEvent")) then
+			spectateRemote.OnClientEvent:Connect(function(target, spec)
+				setSpectatingState(target ~= nil);
+			end);
+		end
+		
+		local specDataRemote = AdminRemotes:FindFirstChild("SpecData");
+		if (specDataRemote and specDataRemote:IsA("RemoteEvent")) then
+			specDataRemote.OnClientEvent:Connect(function()
+				setSpectatingState(true);
+			end);
+		end
+	end
+	
+	while task.wait(1) do
+		if AdminRemotes then
+			local isSpec = (AdminRemotes:GetAttribute("SpecActive") == true);
+			setSpectatingState(isSpec);
 		end
 	end
 end);
