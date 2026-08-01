@@ -250,8 +250,16 @@ local function SnapshotNoSpreadConfig()
 				end
 				if (type(fresh.CustomOffsets) == "table") then
 					orig.CustomOffsets = {};
-					for j, vec in pairs(fresh.CustomOffsets) do
-						orig.CustomOffsets[j] = vec;
+					for j, pattern in pairs(fresh.CustomOffsets) do
+						if (type(pattern) == "table") then
+							local copiedPattern = {};
+							for k, vec in pairs(pattern) do
+								copiedPattern[k] = vec;
+							end
+							orig.CustomOffsets[j] = copiedPattern;
+						else
+							orig.CustomOffsets[j] = pattern;
+						end
 					end
 				end
 				NoSpreadOriginal[gunName] = orig;
@@ -299,10 +307,16 @@ local function RandomizeNoSpread()
 			if (type(cfg.CustomOffsets) == "table" and type(orig.CustomOffsets) == "table" and not doneTables[cfg.CustomOffsets]) then
 				doneTables[cfg.CustomOffsets] = true;
 				local factor = minPct + ((maxPct - minPct) * math.random());
-				for j, vec in pairs(cfg.CustomOffsets) do
-					local base = (typeof(orig.CustomOffsets[j]) == "Vector3" and orig.CustomOffsets[j]) or vec;
-					if typeof(base) == "Vector3" then
-						cfg.CustomOffsets[j] = base * factor;
+				for j, pattern in pairs(cfg.CustomOffsets) do
+					local origPattern = orig.CustomOffsets[j];
+					if (type(pattern) == "table" and type(origPattern) == "table") then
+						for k, vec in pairs(pattern) do
+							if (typeof(origPattern[k]) == "Vector3") then
+								pattern[k] = origPattern[k] * factor;
+							end
+						end
+					elseif (typeof(origPattern) == "Vector3") then
+						cfg.CustomOffsets[j] = origPattern * factor;
 					end
 				end
 			end
@@ -368,11 +382,6 @@ local function applyNoSpreadAll()
 	end
 end
 
-task.spawn(function()
-	while task.wait(0.3) do
-		applyNoSpreadAll();
-	end
-end);
 -- ===== Silent Aim (Boom Hood): сервер и урон доверяют клиентским hit-партам =====
 -- Цели берутся из плеер-листа: только игроки с ролью Trigger.
 local SilentAim = Config.SilentAim;
@@ -2376,6 +2385,7 @@ end
 LocalPlayer.CharacterAdded:Connect(function()
 	task.wait(1);
 	updateAllChams();
+	applyNoSpreadAll();
 end);
 task.spawn(function()
 	while task.wait(2) do
